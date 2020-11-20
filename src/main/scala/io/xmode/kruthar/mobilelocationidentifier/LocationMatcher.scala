@@ -1,6 +1,6 @@
 package io.xmode.kruthar.mobilelocationidentifier
 
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.{DataFrame, SparkSession}
 import org.apache.spark.sql.expressions.UserDefinedFunction
 import org.apache.spark.sql.functions._
 
@@ -35,7 +35,21 @@ object LocationMatcher {
       .option("header", "true")
       .load(config.locationPath)
 
-    // Create an expanded data set where each row is a unit lat/lon for one of the origina location points.
+    val locationMatches = matchLocations(mobileData, locationData)
+
+    if (config.outputPath.isEmpty) {
+      println("Location Match Output Sample:")
+      locationMatches.take(20).foreach(println)
+    } else {
+      locationMatches.write
+        .format(config.outputFormat.getOrElse("csv"))
+        .mode("overwrite")
+        .save(config.outputPath.get)
+    }
+  }
+
+  def matchLocations(mobileData: DataFrame, locationData: DataFrame): DataFrame = {
+    // Create an expanded data set where each row is a unit lat/lon for one of the original location points.
     // Original location points will likely expand into multiple unit lat/lon rows here.
     val unitLocations = locationData
       .withColumn("unitArray", getUnitPointsUDF(col("Latitude"), col("Longitude"), col("Radius")))
@@ -61,7 +75,7 @@ object LocationMatcher {
 
     // Since we were using imprecise unit lat/lons to identify "possible" matches,
     // We now have to double check our matches with a direct distance check
-    val unitMatches = totalUnitJoin
+    totalUnitJoin
       .withColumn("distanceMeters", distanceBetweenUDF(unitMobile("latitude"), unitMobile("longitude"), unitLocations("Latitude"), unitLocations("Longitude")))
       .where(col("distanceMeters") < unitLocations("Radius"))
       .select(
@@ -71,9 +85,6 @@ object LocationMatcher {
         unitMobile("longitude"),
         unitLocations("City")
       )
-
-    println("total records from unit join: " + totalUnitJoin.count())
-    println("total unit matches: " + unitMatches.count())
   }
 }
 

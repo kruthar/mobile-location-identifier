@@ -39,12 +39,16 @@ class ArgParserTest extends FunSpec {
       val args = Array(
         "mobile=/path/to/dir/",
         "locations=/path/to/other/dir/",
+        "output=/path/to/output/",
+        "outformat=parquet",
         "start=1605657600000",
         "end=1605744000000"
       )
       val config = Config(
         Some("/path/to/dir/"),
         Some("/path/to/other/dir/"),
+        Some("/path/to/output/"),
+        Some("parquet"),
         Some(1605657600000L),
         Some(1605744000000L)
       )
@@ -59,6 +63,8 @@ class ArgParserTest extends FunSpec {
       val config = Config(
         Some("/path/to/dir/"),
         Some("/path/to/other/dir/"),
+        None,
+        None,
         None,
         None
       )

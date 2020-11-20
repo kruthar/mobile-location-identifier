@@ -21,6 +21,8 @@ object ArgParser {
       key match {
         case "mobile" => config = config.copy(mobileDataPath = Some(value))
         case "locations" => config = config.copy(locationDataPath = Some(value))
+        case "output" => config = config.copy(outputPath = Some(value))
+        case "outformat" => config = config.copy(outputFormat = Some(value))
         case "start" => try {
             config = config.copy(startTime = Some(value.toLong))
           } catch {
