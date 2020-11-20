@@ -1,9 +1,22 @@
 package io.xmode.kruthar.mobilelocationidentifier
 
 import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.expressions.UserDefinedFunction
 import org.apache.spark.sql.functions._
 
 object LocationMatcher {
+  val getUnitPointsUDF: UserDefinedFunction = udf(
+    (lat: Double, lon: Double, d: Double) => {
+      Geo.getUnitPoints(lat, lon, d)
+    }
+  )
+
+  val distanceBetweenUDF: UserDefinedFunction = udf(
+    (lat1: Double, lon1: Double, lat2: Double, lon2: Double) => {
+      Geo.distanceBetween(lat1, lon1, lat2, lon2)
+    }
+  )
+
   def main(args: Array[String]): Unit = {
     val spark = SparkSession.builder.getOrCreate
     val config = ArgParser.parse(args)
@@ -22,11 +35,45 @@ object LocationMatcher {
       .option("header", "true")
       .load(config.locationPath)
 
-    println("mobile data")
-    mobileData.take(10).foreach(println)
+    // Create an expanded data set where each row is a unit lat/lon for one of the origina location points.
+    // Original location points will likely expand into multiple unit lat/lon rows here.
+    val unitLocations = locationData
+      .withColumn("unitArray", getUnitPointsUDF(col("Latitude"), col("Longitude"), col("Radius")))
+      .withColumn("unitLocation", explode(col("unitArray")))
+      .select(
+        col("City"),
+        col("Latitude"),
+        col("Longitude"),
+        col("Radius"),
+        col("unitLocation"),
+        element_at(col("unitLocation"), 1) as "unitLat",
+        element_at(col("unitLocation"), 2) as "unitLon"
+      )
 
-    println("location data")
-    locationData.take(10).foreach(println)
+    // In the mobile data round the lat/lons down to get the unit lat/lon that the mobile point is in
+    val unitMobile = mobileData
+      .withColumn("unitLat", floor(col("latitude")))
+      .withColumn("unitLon", floor(col("longitude")))
+
+    // Now we can use specific join conditions to drive a more efficient join.
+    val totalUnitJoin = unitMobile
+      .join(unitLocations, Seq("unitLat", "unitLon"))
+
+    // Since we were using imprecise unit lat/lons to identify "possible" matches,
+    // We now have to double check our matches with a direct distance check
+    val unitMatches = totalUnitJoin
+      .withColumn("distanceMeters", distanceBetweenUDF(unitMobile("latitude"), unitMobile("longitude"), unitLocations("Latitude"), unitLocations("Longitude")))
+      .where(col("distanceMeters") < unitLocations("Radius"))
+      .select(
+        unitMobile("advertiser_id"),
+        unitMobile("location_at"),
+        unitMobile("latitude"),
+        unitMobile("longitude"),
+        unitLocations("City")
+      )
+
+    println("total records from unit join: " + totalUnitJoin.count())
+    println("total unit matches: " + unitMatches.count())
   }
 }
 
